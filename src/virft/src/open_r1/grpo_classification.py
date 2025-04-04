@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import pdb
 import os
 import re
 from datetime import datetime
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from datasets import load_dataset, load_from_disk
-from transformers import Qwen2VLForConditionalGeneration
+# from transformers import Qwen2VLForConditionalGeneration
 
 from math_verify import parse, verify
 # from open_r1.trainer import Qwen2VLGRPOTrainer
@@ -92,7 +92,7 @@ def accuracy_reward(completions, solution, **kwargs):
         if os.getenv("DEBUG_MODE") == "true":
             log_path = os.getenv("LOG_PATH")
             # local_rank = int(os.getenv("LOCAL_RANK", 0))
-            with open(log_path, "a") as f:
+            with open(log_path, "a", encoding='utf-8') as f:
                 f.write(f"------------- {current_time} Accuracy reward: {reward} -------------\n")
                 f.write(f"content: {content}\n")
                 f.write(f"sol: {sol}\n")
@@ -126,12 +126,15 @@ def main(script_args, training_args, model_args):
     reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
     # import pdb; pdb.set_trace()
 
-    # Load the dataset
-    # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
-    ### lzy modified
+
+    ## lzy modified
     from datasets import DatasetDict
     dataset = DatasetDict.load_from_disk(script_args.dataset_name)
 
+
+    # from datasets import load_dataset
+    # # dataset = load_dataset("parquet", data_files="/map-vepfs/datasets/ViRFT_CLS_flower_4_shot/data/train-00000-of-00001.parquet")
+    # dataset = load_dataset("parquet", data_files=script_args.dataset_name)
 
     # Format into conversation
     def make_conversation(example):
@@ -166,7 +169,8 @@ def main(script_args, training_args, model_args):
         dataset = dataset.map(make_conversation)
         dataset = dataset.remove_columns("messages")
 
-    
+    # pdb.set_trace()
+
     trainer_cls = Qwen2VLGRPOTrainer if not training_args.use_vllm else Qwen2VLGRPOVLLMTrainer
     print("using: ", trainer_cls)
 
@@ -189,8 +193,8 @@ def main(script_args, training_args, model_args):
 
     # Save and push to hub
     trainer.save_model(training_args.output_dir)
-    if training_args.push_to_hub:
-        trainer.push_to_hub(dataset_name=script_args.dataset_name)
+    # if training_args.push_to_hub:
+    #     trainer.push_to_hub(dataset_name=script_args.dataset_name)
 
 
 if __name__ == "__main__":
