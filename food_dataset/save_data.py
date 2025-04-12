@@ -9,9 +9,9 @@ from tqdm import tqdm
 
 # 添加命令行参数解析
 parser = argparse.ArgumentParser(description='处理食物图像数据并保存为 Dataset 格式')
-parser.add_argument('--k', type=int, default=10000, help='每个类别保存的样本数量')
+parser.add_argument('--k', type=int, default=100000, help='每个类别保存的样本数量')
 parser.add_argument('--workers', type=int, default=os.cpu_count(), help='工作线程数量')
-parser.add_argument('--output_path', type=str, default='./share_data/veg200_dataset_all_shot', help='保存数据集的路径')
+parser.add_argument('--output_path', type=str, default='./share_data/food101_dataset_all_shot', help='保存数据集的路径')
 args = parser.parse_args()
 
 k_shot = args.k
@@ -25,7 +25,7 @@ print(f"输出路径: {output_path}")
 # -----------------------------
 # Step 1: 读取 JSON 文件中的数据
 # -----------------------------
-json_filename = '/map-vepfs/dehua/code/visual-memory/questions/veg200/clip_train_5_fewshot4_old.json'
+json_filename = '/map-vepfs/dehua/code/visual-memory/questions/food101/clip_train_5_fewshot4_old.json'
 with open(json_filename, 'r', encoding='utf-8') as file:
     data = json.load(file)
 

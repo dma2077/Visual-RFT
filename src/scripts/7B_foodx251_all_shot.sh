@@ -32,6 +32,6 @@ torchrun --nproc_per_node="8" \
     --max_pixels 100352 \
     --num_train_epochs 1 \
     --run_name Qwen2.5-VL-7B-_GRPO_foodx251_all_shot \
-    --save_steps 100 \
+    --save_strategy epoch \
     --save_only_model true \
     --num_generations 4
