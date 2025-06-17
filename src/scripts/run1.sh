@@ -1,0 +1,1 @@
+bash /llm_reco/dehua/code/Visual-RFT/src/scripts/sft+rl_0518.sh "foodx251" "3"

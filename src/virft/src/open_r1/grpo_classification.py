@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import pdb
+import sys
+print(f"--- SCRIPT EXECUTED BY: {sys.executable} ---")
+
 import os
 import re
 from datetime import datetime
@@ -52,12 +55,107 @@ class GRPOScriptArguments(ScriptArguments):
     )
 
 
-def accuracy_reward(completions, solution, **kwargs):
+# def accuracy_reward(completions, solution, **kwargs):
+#     """Reward function that checks if the completion is correct using either symbolic verification or exact string matching."""
+#     contents = [completion[0]["content"] for completion in completions]
+#     rewards = []
+#     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
+#     for content, sol in zip(contents, solution):
+#         reward = 0.0
+#         # Try symbolic verification first
+#         try:
+#             answer = parse(content)
+#             if float(verify(answer, parse(sol))) > 0:
+#                 reward = 1.0
+#         except Exception:
+#             pass  # Continue to next verification method if this fails
+
+#         # If symbolic verification failed, try string matching
+#         if reward == 0.0:
+#             try:
+#                 # Extract as before…
+#                 sol_match = re.search(r'<answer>(.*?)</answer>', sol, flags=re.IGNORECASE)
+#                 ground_truth = sol_match.group(1).strip() if sol_match else sol.strip()
+                        
+#                 content_match = re.search(r'<answer>(.*?)</answer>', content, flags=re.IGNORECASE)
+#                 student_answer = content_match.group(1).strip() if content_match else content.strip()
+
+#                 # Normalize to lower‐case (or use .casefold() for full Unicode)
+#                 gt_norm = ground_truth.lower()
+#                 sa_norm = student_answer.lower()
+
+#                 if gt_norm == sa_norm:
+#                     reward = 1.0
+#                 else:
+#                     from difflib import SequenceMatcher
+#                     def text_similarity(a, b):
+#                         return SequenceMatcher(None, a, b).ratio()
+    
+#                     reward = 0.6 * text_similarity(gt_norm, sa_norm)
+#             except Exception:
+#                 pass
+
+#         rewards.append(reward)
+#         # import pdb; pdb.set_trace()
+#         if os.getenv("DEBUG_MODE") == "true":
+#             log_path = os.getenv("LOG_PATH")
+#             # local_rank = int(os.getenv("LOCAL_RANK", 0))
+#             with open(log_path, "a", encoding='utf-8') as f:
+#                 f.write(f"------------- {current_time} Accuracy reward: {reward} -------------\n")
+#                 f.write(f"content: {content}\n")
+#                 f.write(f"sol: {sol}\n")
+#     return rewards
+
+# def accuracy_reward(completions, solution, **kwargs):
+#     """Reward function that checks if the completion is correct using either symbolic verification or exact string matching."""
+#     contents = [completion[0]["content"] for completion in completions]
+#     rewards = []
+#     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
+#     for content, sol in zip(contents, solution):
+#         reward = 0.0
+#         # Try symbolic verification first
+#         try:
+#             answer = parse(content)
+#             if float(verify(answer, parse(sol))) > 0:
+#                 reward = 1.0
+#         except Exception:
+#             pass  # Continue to next verification method if this fails
+
+#         # If symbolic verification failed, try string matching
+#         if reward == 0.0:
+#             try:
+#                 # Extract as before…
+#                 ground_truth = sol.replace("<answer>", "").replace("</answer>", "")
+#                 student_answer = content
+#                 gt_norm = ground_truth.lower()
+#                 sa_norm = student_answer.lower()
+#                 if gt_norm == sa_norm:
+#                     reward = 1.0
+#                 else:
+#                     from difflib import SequenceMatcher
+#                     def text_similarity(a, b):
+#                         return SequenceMatcher(None, a, b).ratio()
+#                     reward = 0.6 * text_similarity(gt_norm, sa_norm)
+#             except Exception:
+#                 pass
+#         rewards.append(reward)
+#         # import pdb; pdb.set_trace()
+#         if os.getenv("DEBUG_MODE") == "true":
+#             log_path = os.getenv("LOG_PATH")
+#             # local_rank = int(os.getenv("LOCAL_RANK", 0))
+#             with open(log_path, "a", encoding='utf-8') as f:
+#                 f.write(f"------------- {current_time} Accuracy reward: {reward} -------------\n")
+#                 f.write(f"content: {content}\n")
+#                 f.write(f"sol: {ground_truth}\n")
+#     return rewards
+
+
+def accuracy_reward(completions, solution, supclass, **kwargs):
     """Reward function that checks if the completion is correct using either symbolic verification or exact string matching."""
     contents = [completion[0]["content"] for completion in completions]
     rewards = []
     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
-    for content, sol in zip(contents, solution):
+    for content, sol, sc in zip(contents, solution, supclass):
         reward = 0.0
         # Try symbolic verification first
         try:
@@ -70,23 +168,25 @@ def accuracy_reward(completions, solution, **kwargs):
         # If symbolic verification failed, try string matching
         if reward == 0.0:
             try:
-                # Extract answer from solution if it has think/answer tags
-                sol_match = re.search(r'<answer>(.*?)</answer>', sol)
-                ground_truth = sol_match.group(1).strip() if sol_match else sol.strip()
-                
-                # Extract answer from content if it has think/answer tags
-                content_match = re.search(r'<answer>(.*?)</answer>', content)
-                student_answer = content_match.group(1).strip() if content_match else content.strip()
-                
-                ground_truth = ground_truth.replace(' ','').replace('_','').lower()
-                student_answer = student_answer.replace(' ','').replace('_','').lower()
-
-                # Compare the extracted answers
-                if ground_truth in student_answer or student_answer in ground_truth:
+                # Extract as before…
+                ground_truth = sol.replace("<answer>", "").replace("</answer>", "")
+                student_answer = content
+                gt_norm = ground_truth.lower()
+                sa_norm = student_answer.lower()
+                m = re.match(r'\s*(.*?)\s*\|\s*(.+)', sa_norm)
+                if m:
+                    super_class_prediction = m.group(1)
+                    class_prediction = m.group(2)
+                else:
+                    reward = 0.0
+                if super_class_prediction.lower() == sc.lower() and class_prediction == gt_norm:
                     reward = 1.0
+                elif super_class_prediction.lower() == sc.lower():
+                    reward = 0.5
+                else:
+                    reward = 0.0
             except Exception:
-                pass  # Keep reward as 0.0 if both methods fail
-                
+                pass
         rewards.append(reward)
         # import pdb; pdb.set_trace()
         if os.getenv("DEBUG_MODE") == "true":
@@ -95,8 +195,47 @@ def accuracy_reward(completions, solution, **kwargs):
             with open(log_path, "a", encoding='utf-8') as f:
                 f.write(f"------------- {current_time} Accuracy reward: {reward} -------------\n")
                 f.write(f"content: {content}\n")
-                f.write(f"sol: {sol}\n")
+                f.write(f"sol: {ground_truth}\n")
     return rewards
+
+# def accuracy_reward(completions, solution, **kwargs):
+#     """Reward function that checks if the completion is correct using either symbolic verification or exact string matching."""
+#     contents = [completion[0]["content"] for completion in completions]
+#     rewards = []
+#     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
+#     for content, sol in zip(contents, solution):
+#         reward = 0.0
+#         # Try symbolic verification first
+#         try:
+#             answer = parse(content)
+#             if float(verify(answer, parse(sol))) > 0:
+#                 reward = 1.0
+#         except Exception:
+#             pass
+
+#         if reward == 0.0:
+#             try:
+#                 ground_truth = sol.replace("<answer>", "").replace("</answer>", "")
+#                 student_answer = content
+#                 gt_norm = ground_truth.lower()
+#                 sa_norm = student_answer.lower()
+#                 if gt_norm == sa_norm:
+#                     reward = 1.0
+#                 else:
+#                     reward = 0.0
+#             except Exception:
+#                 pass
+#         rewards.append(reward)
+#         # import pdb; pdb.set_trace()
+#         if os.getenv("DEBUG_MODE") == "true":
+#             log_path = os.getenv("LOG_PATH")
+#             # local_rank = int(os.getenv("LOCAL_RANK", 0))
+#             with open(log_path, "a", encoding='utf-8') as f:
+#                 f.write(f"------------- {current_time} Accuracy reward: {reward} -------------\n")
+#                 f.write(f"content: {content}\n")
+#                 f.write(f"sol: {ground_truth}\n")
+#     return rewards
+
 
 def format_reward(completions, **kwargs):
     """Reward function that checks if the completion has a specific format."""
@@ -108,7 +247,7 @@ def format_reward(completions, **kwargs):
 
 reward_funcs_registry = {
     "accuracy": accuracy_reward,
-    "format": format_reward,
+    # "format": format_reward,
 }
 
 SYSTEM_PROMPT = (
@@ -122,7 +261,8 @@ SYSTEM_PROMPT = (
 def main(script_args, training_args, model_args):
     # Get reward functions
     # import pdb; pdb.set_trace()
-    script_args.reward_funcs = ['accuracy','format']
+    # script_args.reward_funcs = ['accuracy','format']
+    script_args.reward_funcs = ['accuracy']
     reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
     # import pdb; pdb.set_trace()
 
@@ -130,8 +270,9 @@ def main(script_args, training_args, model_args):
     ## lzy modified
     from datasets import DatasetDict
     dataset = DatasetDict.load_from_disk(script_args.dataset_name)
-
-
+    
+    # from datasets import load_from_disk
+    # dataset = load_from_disk(script_args.dataset_name)
     # from datasets import load_dataset
     # # dataset = load_dataset("parquet", data_files="/map-vepfs/datasets/ViRFT_CLS_flower_4_shot/data/train-00000-of-00001.parquet")
     # dataset = load_dataset("parquet", data_files=script_args.dataset_name)
@@ -140,7 +281,7 @@ def main(script_args, training_args, model_args):
     def make_conversation(example):
         return {
             "prompt": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                # {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": example["problem"]},
             ],
         }
@@ -148,21 +289,58 @@ def main(script_args, training_args, model_args):
     def make_conversation_image(example):
         return {
             "prompt": [
+                # {
+                #     "role":    "system",
+                #     "content": [
+                #         {"type": "text", "text": SYSTEM_PROMPT}
+                #     ],
+                # },
                 {
-                    "role": "user",
+                    "role":    "user",
                     "content": [
                         {"type": "image"},
                         {"type": "text", "text": example["problem"]},
                     ],
                 },
-            ],
+            ]
         }
+    # def make_conversation_image(example):
+    #     return {
+    #         "prompt": [
+    #             {
+    #                 "role": "user",
+    #                 "content": [
+    #                     {"type": "image"},
+    #                     {"type": "text", "text": example["problem"]},
+    #                 ],
+    #             },
+    #         ],
+    #     }
 
+    import os
 
-    if "image" in dataset[script_args.dataset_train_split].features:
+    # 1) 定义一个 debug wrapper，带上 idx，并检查你怀疑出问题的字段
+    def debug_make_conversation_image(example, idx):
+        out = make_conversation_image(example)
+        # 假设问题出在 out["some_field"] 上，请替换成你真正怀疑的列名
+        val = out.get("some_field")
+        # 如果既不是 list，也不是 None，就打印出来看看
+        if val is not None and not isinstance(val, list):
+            print(f"[BUG] idx={idx}, some_field type={type(val)}, value={val!r}")
+        return out
+
+    # 2) 在 map 时用 with_indices=True 拿到 idx，用 num_proc 保持并行
+    split = script_args.dataset_train_split
+    if "image" in dataset[split].features:
         print("has image in dataset")
-        dataset = dataset.map(make_conversation_image)  # Utilize multiprocessing for faster mapping
-        # dataset = dataset.remove_columns(["original_question", "original_answer"])
+        dataset = dataset.map(
+            make_conversation_image,
+        )
+
+    # if "image" in dataset[script_args.dataset_train_split].features:
+    #     print("has image in dataset")
+    #     dataset = dataset.map(make_conversation_image)  # Utilize multiprocessing for faster mapping
+    #     # dataset = dataset.remove_columns(["original_question", "original_answer"])
 
     else:
         print("no image in dataset")

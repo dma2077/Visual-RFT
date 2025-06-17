@@ -1,2 +1,7 @@
 outputs/*
 share_data
+wandb/*
+*.log
+*.txt
+food_dataset/fru92.json
+food_dataset/veg200.json

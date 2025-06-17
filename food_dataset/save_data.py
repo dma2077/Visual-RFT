@@ -1,145 +1,146 @@
-import json
-from datasets import Dataset, DatasetDict
-from PIL import Image
-import io
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import argparse
-import concurrent.futures
+import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datasets import Dataset, DatasetDict, Features, Value, Image
 from tqdm import tqdm
 
-# 添加命令行参数解析
-parser = argparse.ArgumentParser(description='处理食物图像数据并保存为 Dataset 格式')
-parser.add_argument('--k', type=int, default=100000, help='每个类别保存的样本数量')
-parser.add_argument('--workers', type=int, default=os.cpu_count(), help='工作线程数量')
-parser.add_argument('--output_path', type=str, default='./share_data/food101_dataset_all_shot', help='保存数据集的路径')
-args = parser.parse_args()
-
-k_shot = args.k
-num_workers = args.workers
-output_path = args.output_path
-
-print(f"每个类别将保存 {k_shot} 个样本")
-print(f"使用 {num_workers} 个工作线程")
-print(f"输出路径: {output_path}")
-
-# -----------------------------
-# Step 1: 读取 JSON 文件中的数据
-# -----------------------------
-json_filename = '/map-vepfs/dehua/code/visual-memory/questions/food101/clip_train_5_fewshot4_old.json'
-with open(json_filename, 'r', encoding='utf-8') as file:
-    data = json.load(file)
-
-# -----------------------------
-# Step 2: 定义图像预处理函数
-# -----------------------------
-def process_image(item):
-    d, category_counts_local = item
-    # 获取图片路径，假设图片路径位于 "images" 数组的第一个元素
-    image_path = d["images"][0]
-    
-    # 从对话中获取类别名称（同时作为 solution_text）
-    solution_text = d['conversations'][1]['value']
-    category = solution_text  # 用于分类统计，可选存储
-    
-    # 构造 solution 字段，外层套 <answer> 标签
-    solution = f"<answer>{solution_text}</answer>"
-    
-    # 构造 problem 字段，提供图片任务说明
-    problem = (
-        "This is an image containing a food. Please identify the categories of the food based on the image.\n"
-        "Output the thinking process in <think> </think> and final answer in <answer> </answer> tags. "
-        "The output answer format should be as follows:\n"
-        "<think> ... </think> <answer>category name</answer>\n"
-        "Please strictly follow the format."
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='基于 food101_question.json 构造 few-shot HF Dataset'
     )
-    
-    # 读取并处理图像
-    try:
-        with open(image_path, "rb") as f:
-            original_bytes = f.read()
-        img = Image.open(io.BytesIO(original_bytes))
-        
-        # 若图像模式不是 RGB，则转换
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # 如果图像较大，则调整尺寸（保持长宽比，最大边不超过800像素）
-        max_size = 800
-        if max(img.size) > max_size:
-            ratio = max_size / max(img.size)
-            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-            img = img.resize(new_size, Image.LANCZOS)
-    except Exception as e:
-        print(f"Warning: 无法处理图片 {image_path}. 错误: {e}")
-        img = None
+    parser.add_argument(
+        '--json', type=str,
+        default='/llm_reco/dehua/data/questions/foodx251_question.json',
+        help='原始 JSON 文件路径（含 images & conversations）'
+    )
+    parser.add_argument(
+        '--k', type=int, default=10000,
+        help='每个类别保留前 K 条样本'
+    )
+    parser.add_argument(
+        '--workers', type=int, default=64,
+        help='并行处理线程数'
+    )
+    parser.add_argument(
+        '--output_path', type=str,
+        default='/llm_reco/dehua/code/Visual-RFT/share_data/food251_all_dataset_nocot',
+        help='输出 HF DatasetDict 路径，推荐使用绝对路径'
+    )
+    return parser.parse_args()
+
+def load_raw(json_path):
+    with open(json_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def select_k_shot(data, k_shot):
+    selected, counts = [], {}
+    for d in data:
+        cat = d['conversations'][1]['value']
+        if counts.get(cat, 0) >= k_shot:
+            continue
+        counts[cat] = counts.get(cat, 0) + 1
+        selected.append(d)
+    print(f"■ 原始共 {len(data)} 条，few-shot 后 {len(selected)} 条；各类分布：{counts}")
+    return selected
+
+def process_image_path(d):
+    raw = d["images"][0]
+    image_path = raw.replace(
+        "/map-vepfs/dehua/data/data/",
+        "/llm_reco/dehua/data/food_data/"
+    )
+
+    # 检查并确保 image_path 存在
+    if not os.path.exists(image_path):
+        print(f"⚠️ Warning: Image path 不存在 - {image_path}")
+
+    sol_txt = d['conversations'][1]['value']
+
+    # 强制sol_txt为字符串，避免类型混合
+    if isinstance(sol_txt, list):
+        sol_txt = " ".join(sol_txt)
+        print(sol_txt)
+    elif sol_txt is None or not isinstance(sol_txt, str):
+        sol_txt = ""
+        print("None")
+    sol_txt = sol_txt.strip()  # 去除前后空格
 
     return {
-        'image': img,
-        'problem': problem,
-        'solution': solution,
-        'category': category  # 可选字段，用于后续统计
+        'image_path': image_path,
+        'problem': "<image>\nWhat is the category of the food?",
+        'solution': f"<answer>{sol_txt}</answer>",
+        'category': sol_txt
     }
 
-# -----------------------------
-# Step 3: 根据每个类别只选取 k 个样本的原则进行预处理
-# -----------------------------
-print("预处理样本数据...")
-selected_items = []
-category_counts = {}
+def build_dataset_dict(records, save_path):
+    image_paths = [r['image_path'] for r in records]
+    problems    = [r['problem']    for r in records]
+    solutions   = [r['solution']   for r in records]
+    categories  = [r['category']   for r in records]
 
-for d in data:
-    solution_text = d['conversations'][1]['value']
-    category = solution_text
-    # 检查该类别是否已经达到 k 个样本
-    if category_counts.get(category, 0) >= k_shot:
-        continue
-    selected_items.append((d, category_counts.copy()))
-    category_counts[category] = category_counts.get(category, 0) + 1
+    features = Features({
+        'image':    Image(),
+        'problem':  Value('string'),
+        'solution': Value('string'),
+        'category': Value('string')
+    })
 
-print(f"选择了 {len(selected_items)} 个样本进行处理")
+    ds = Dataset.from_dict(
+        {
+            'image':    image_paths,
+            'problem':  problems,
+            'solution': solutions,
+            'category': categories
+        },
+        features=features
+    )
 
-# -----------------------------
-# Step 4: 多线程处理图像数据
-# -----------------------------
-results = []
-with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-    for result in tqdm(executor.map(process_image, selected_items), total=len(selected_items), desc="多线程处理图像", unit="img"):
-        results.append(result)
+    ds_dict = DatasetDict({'train': ds})
 
-# -----------------------------
-# Step 5: 整理处理结果，构造 Dataset 数据
-# -----------------------------
-images = []
-problems = []
-solutions = []
-categories = []  # 可选字段
+    # 安全写入文件并捕获异常
+    try:
+        ds_dict.save_to_disk(save_path)
+        print(f"✅ DatasetDict 已保存到 {save_path}")
+    except Exception as e:
+        print(f"❌ 保存DatasetDict失败：{e}")
 
-for res in results:
-    images.append(res['image'])
-    problems.append(res['problem'])
-    solutions.append(res['solution'])
-    categories.append(res['category'])
+    return ds_dict
 
-# 创建数据集字典
-dataset_dict = {
-    'image': images,
-    'problem': problems,
-    'solution': solutions,
-    'category': categories  # 如果不需要可去除
-}
+def main():
+    args = parse_args()
+    print("🚩 脚本开始：", time.asctime())
 
-# 用 datasets 库构造 Dataset 对象，然后包装为 DatasetDict
-dataset = Dataset.from_dict(dataset_dict)
-dataset_dict_hf = DatasetDict({
-    'train': dataset
-})
+    raw = load_raw(args.json)
+    sel = select_k_shot(raw, args.k)
 
-print(f"\n总共收集了 {len(dataset)} 个样本")
-print(f"类别分布: {category_counts}")
+    print("🚩 并行处理路径与文本…")
+    with ThreadPoolExecutor(max_workers=args.workers) as exe:
+        records = list(tqdm(
+            exe.map(process_image_path, sel),
+            total=len(sel),
+            desc="处理数据",
+            unit="条"
+        ))
 
-# -----------------------------
-# Step 6: 保存数据集到磁盘
-# -----------------------------
-print("保存 DatasetDict 到磁盘...")
-dataset_dict_hf.save_to_disk(output_path)
-print(f"数据集已保存到 {output_path}")
+    def check_records(records):
+        for idx, record in enumerate(records):
+            for key, value in record.items():
+                if not isinstance(value, str):
+                    print(f"[类型问题] 在第 {idx} 条数据，字段 '{key}' 不是字符串，实际值: {value}，类型: {type(value)}", flush=True)
+    print("🔍 检查记录字段类型...", flush=True)
+    check_records(records)
+    # 构造并保存 HF DatasetDict
+    ds_dict = build_dataset_dict(records, args.output_path)
+
+    print("🚩 脚本结束：", time.asctime())
+    # 示例加载数据:
+    # from datasets import DatasetDict
+    # loaded = DatasetDict.load_from_disk(args.output_path)
+
+if __name__ == '__main__':
+    main()
