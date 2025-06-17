@@ -21,6 +21,10 @@ def parse_args():
         "--output_path", "-o", default=f'/llm_reco/dehua/code/Visual-RFT/share_data/{dataset_name}',
         help="输出 DatasetDict 保存目录"
     )
+    parser.add_argument(
+        "--skip_json", "-s", default=f'/llm_reco/dehua/data/food_finetune_data/{dataset_name}_cold_sft.json',
+        help="包含需要跳过的图片路径的JSON文件"
+    )
     return parser.parse_args()
 
 
@@ -29,6 +33,13 @@ def main():
     print(f"🚩 读取 JSON：{args.json}")
     with open(args.json, "r", encoding="utf-8") as f:
         raw = json.load(f)
+
+    # 加载需要跳过的图片路径
+    print(f"🚩 读取需要跳过的图片路径：{args.skip_json}")
+    with open(args.skip_json, "r", encoding="utf-8") as f:
+        skip_data = json.load(f)
+    skip_images = {item["images"][0] for item in skip_data}
+    print(f"✅ 需要跳过的图片数量：{len(skip_images)}")
 
     # 初始化字段
     images, problems, solutions, categories, supclasses = [], [], [], [], []
@@ -41,6 +52,12 @@ def main():
                 "/map-vepfs/dehua/data/data/",
                 "/llm_reco/dehua/data/food_data/"
             ).replace("vegfru-dataset/", "")
+            
+            # 检查是否需要跳过该图片
+            if image_path in skip_images:
+                print(f"⏭️ 跳过已存在的图片：{image_path}")
+                continue
+                
             # 加载 + resize
             img = Image.open(image_path).convert("RGB").resize((224, 224), resample=Image.LANCZOS)
             images.append(img)
